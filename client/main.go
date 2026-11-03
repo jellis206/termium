@@ -325,7 +325,7 @@ func runInteractive() error {
 		keyboardHandler.navigate(pb.NavigationAction_NAVIGATE, address)
 	}
 	pipeline.paused.Store(true) // The first redraw releases capture after initial navigation.
-	preparer := &framePreparer{renderer: cfg.Renderer, palette: cfg.Palette}
+	preparer := &framePreparer{renderer: cfg.Renderer, palette: cfg.Palette, cell: charSize}
 	shutdownWg.Add(1)
 	go func() {
 		defer shutdownWg.Done()
@@ -410,7 +410,7 @@ func initializeScreen() tcell.Screen {
 // finalizeScreen properly closes the tcell screen
 func finalizeScreen(s tcell.Screen) {
 	if cfg.Renderer == "kitty" {
-		fmt.Fprint(graphicsOutput, kittyDelete)
+		fmt.Fprint(graphicsOutput, kittyDeleteAll())
 	}
 	s.Fini()
 	Debug("Screen finalized", DEBUG)
@@ -627,6 +627,17 @@ func displayFrame(s tcell.Screen, frame *Frame) error {
 	switch cfg.Renderer {
 	case "tcell":
 		err = displayWithTcell(s, frame.Image)
+	case "kitty":
+		if len(frame.Tiles.Tiles) == 0 {
+			err = writeGraphicsFrame(graphicsOutput, frame.Graphics, sDims.ViewTop+1, H_BORDER_WIDTH+1)
+			break
+		}
+		first := kittyShown == nil
+		kittyShown, err = writeKittyTiles(graphicsOutput, frame.Tiles, kittyShown, sDims.ViewTop+1, H_BORDER_WIDTH+1)
+		if err == nil && first {
+			// The tiles now cover the splash placement.
+			fmt.Fprint(graphicsOutput, kittyDelete)
+		}
 	default:
 		err = writeGraphicsFrame(graphicsOutput, frame.Graphics, sDims.ViewTop+1, H_BORDER_WIDTH+1)
 	}
@@ -640,7 +651,7 @@ func invalidateGraphics(s tcell.Screen) {
 	if cfg != nil && cfg.Renderer == "kitty" {
 		// The splash and a partially written frame can own this placement even
 		// when no browser frame has been recorded as successfully displayed.
-		fmt.Fprint(graphicsOutput, kittyDelete)
+		fmt.Fprint(graphicsOutput, kittyDeleteAll())
 	}
 	displayedFrame = nil
 	// Sixel has no portable delete-image command. A real terminal clear is

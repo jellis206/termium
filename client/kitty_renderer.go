@@ -33,6 +33,11 @@ func (e *kittyEncoder) encodeRGB(img *image.RGBA) ([]byte, error) {
 	return e.encodeRGBInto(img, nil)
 }
 func (e *kittyEncoder) encodeRGBInto(img *image.RGBA, alloc frameAllocator) ([]byte, error) {
+	return e.encodeRGBControl(img, kittyPlacement, alloc)
+}
+
+// encodeRGBControl sends img as zlib RGB with the given transmit/placement keys.
+func (e *kittyEncoder) encodeRGBControl(img *image.RGBA, placement string, alloc frameAllocator) ([]byte, error) {
 	if img == nil || img.Bounds().Empty() {
 		return nil, fmt.Errorf("Kitty image is empty")
 	}
@@ -67,7 +72,7 @@ func (e *kittyEncoder) encodeRGBInto(img *image.RGBA, alloc frameAllocator) ([]b
 	if err := e.compressor.Close(); err != nil {
 		return nil, err
 	}
-	return encodeKittyPayloadInto(e.compressed.Bytes(), fmt.Sprintf("f=24,s=%d,v=%d,o=z,%s", bounds.Dx(), bounds.Dy(), kittyPlacement), alloc)
+	return encodeKittyPayloadInto(e.compressed.Bytes(), fmt.Sprintf("f=24,s=%d,v=%d,o=z,%s", bounds.Dx(), bounds.Dy(), placement), alloc)
 }
 
 // Explicit lossless PNG capture can pass through unchanged. Both this path and

@@ -132,7 +132,14 @@ func TestBothRenderersPrepareTheSameJPEGSource(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(f.Graphics) == 0 || f.Image == nil || f.Width != 37 || f.Height != 19 {
+		payload := f.Graphics
+		if renderer == "kitty" {
+			if len(f.Tiles.Tiles) != 1 {
+				t.Fatalf("kitty without a cell size should prepare one tile, got %d", len(f.Tiles.Tiles))
+			}
+			payload = f.Tiles.Tiles[0].Payload
+		}
+		if len(payload) == 0 || f.Image == nil || f.Width != 37 || f.Height != 19 {
 			t.Fatalf("%s left preparation to the UI", renderer)
 		}
 		if sharedPixels == nil {
@@ -141,7 +148,7 @@ func TestBothRenderersPrepareTheSameJPEGSource(t *testing.T) {
 			t.Fatal("renderers did not start from identical decoded pixels")
 		}
 		if renderer == "kitty" {
-			_, data := decodeKittyPayload(t, f.Graphics)
+			_, data := decodeKittyPayload(t, payload)
 			r, err := zlib.NewReader(bytes.NewReader(data))
 			if err != nil {
 				t.Fatal(err)

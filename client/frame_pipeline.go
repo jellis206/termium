@@ -91,6 +91,8 @@ type framePreparer struct {
 	bands             *BandManager
 	bandEncoder       *BandEncoder
 	kitty             kittyEncoder
+	tiler             kittyTiler
+	cell              CharSize // Kitty tile size is a whole number of cells
 }
 
 // close releases the comparison frame. The worker calls it on shutdown;
@@ -113,7 +115,7 @@ func (p *framePreparer) prepare(raw *Frame) (*Frame, error) {
 	if p.last != nil && raw.Generation == p.last.Generation && bytes.Equal(raw.Data, p.last.Data) {
 		return p.reuse(raw), nil
 	}
-	dim, format, err := image.DecodeConfig(bytes.NewReader(raw.Data))
+	dim, _, err := image.DecodeConfig(bytes.NewReader(raw.Data))
 	if err != nil {
 		return nil, err
 	}
@@ -133,15 +135,6 @@ func (p *framePreparer) prepare(raw *Frame) (*Frame, error) {
 		}
 	}()
 	f := &Frame{storage: arena, Data: raw.Data, Generation: raw.Generation, State: raw.State, Width: dim.Width, Height: dim.Height, Timestamp: raw.Timestamp, CapturedAt: raw.CapturedAt}
-	if p.renderer == "kitty" && format == "png" {
-		f.Graphics, err = encodeKittyPayloadInto(raw.Data, "f=100,"+kittyPlacement, arena.alloc)
-		if err != nil {
-			return nil, err
-		}
-		p.remember(f)
-		transferred = true
-		return f, nil
-	}
 	img, _, err := image.Decode(bytes.NewReader(raw.Data))
 	if err != nil {
 		return nil, err
@@ -156,7 +149,7 @@ func (p *framePreparer) prepare(raw *Frame) (*Frame, error) {
 		if f.Generation == p.last.Generation {
 			return p.reuse(raw), nil
 		}
-		f.Image, f.Graphics = p.last.Image, p.last.Graphics
+		f.Image, f.Graphics, f.Tiles = p.last.Image, p.last.Graphics, p.last.Tiles
 		f.storage = p.last.storage
 		f.retain()
 		p.remember(f)
@@ -165,7 +158,11 @@ func (p *framePreparer) prepare(raw *Frame) (*Frame, error) {
 		f.Image = rgba
 		if p.renderer != "tcell" {
 			if p.renderer == "kitty" {
-				f.Graphics, err = p.kitty.encodeRGBInto(rgba, arena.alloc)
+				var previous *image.RGBA
+				if p.last != nil {
+					previous = p.last.Image
+				}
+				f.Tiles, err = p.tiler.prepare(rgba, previous, p.cell)
 			} else {
 				f.Graphics, err = p.encodeInto(rgba, arena.alloc)
 			}

@@ -16,7 +16,8 @@ type Frame struct {
 	Timestamp     time.Time
 	CapturedAt    time.Time
 	Image         *image.RGBA
-	Graphics      []byte // complete renderer payload; cursor placement is added by the UI
+	Graphics      []byte     // complete renderer payload; cursor placement is added by the UI
+	Tiles         kittyTiles // Kitty only: per-tile payloads; the UI sends the changed ones
 }
 
 // retain returns another lease on the same immutable frame. Heap-only frames
