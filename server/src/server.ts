@@ -1,5 +1,6 @@
 import * as grpc from '@grpc/grpc-js';
 import { BrowserSession } from './browser-session';
+import { PersistentStorage, storagePath } from './persistent-storage';
 import * as puppeteer from 'puppeteer';
 import { Command } from 'commander';
 import * as fs from 'fs';
@@ -19,6 +20,7 @@ const logDebug = debugFactory('server:debug');
 let browser: puppeteer.Browser | null = null;
 let page: puppeteer.Page | null = null;
 let browserLaunch: Promise<void> | null = null;
+let storage: PersistentStorage | undefined;
 let shuttingDown = false;
 const browserAbort = new AbortController();
 const controls = new BrowserSession(async () => {
@@ -182,6 +184,12 @@ async function launchBrowser() {
         throw error;
     }
     startCaptureDiagnostics(browser!);
+    const file = options.browser ? undefined : storagePath();
+    if (file) {
+        logDebug('Persisting storage to', file);
+        const persistent = new PersistentStorage(browser!, file, logDebug);
+        await persistent.start().then(() => { storage = persistent; }, error => logDebug('Storage unavailable:', error));
+    }
 }
 
 const maxScreenshotBytes = 32 * 1024 * 1024;
@@ -458,6 +466,7 @@ function main() {
     try {
       if (!browser) browserAbort.abort();
       await browserLaunch?.catch(() => {});
+      await storage?.stop();
       if (browser) await browser.close();
       console.log('Server shutdown complete');
       clearTimeout(forcedExit);

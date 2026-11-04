@@ -130,6 +130,14 @@ func startServer() error {
 	serverProcess = exec.Command(nodePath, args...)
 	serverProcess.Dir = loc.workDir
 	serverProcess.Env = env
+	cwd, _ := os.Getwd()
+	home, _ := os.UserHomeDir()
+	if profile, err := resolveStorageProfile(cwd, home); err != nil {
+		Debug(fmt.Sprintf("Ignoring storage profile: %v", err), WARN)
+	} else if profile != "" {
+		Debug(fmt.Sprintf("Using storage profile %s", profile), INFO)
+		serverProcess.Env = append(serverProcess.Env, storageProfileEnv+"="+profile)
+	}
 	if cfg.Debug {
 		serverProcess.Env = append(serverProcess.Env, "TERMIUM_INPUT_TRACE=1")
 	}
