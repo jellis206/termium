@@ -11,6 +11,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 )
 
 type browserOperation struct {
@@ -50,6 +51,26 @@ func newInputDispatcher(ctx context.Context, client pb.BrowserControlClient, not
 func (o browserOperation) motion() bool {
 	return o.input != nil && o.input.Kind == pb.InputKind_POINTER_INPUT && o.input.ClickCount == 0
 }
+func (o browserOperation) wheel() bool {
+	return o.input != nil && o.input.Kind == pb.InputKind_WHEEL_INPUT
+}
+
+// mergeWheel folds a queued wheel tick into the next one for the same target.
+// Each wheel is a Chromium round-trip, so unmerged ticks from a trackpad flick
+// back up and then land all at once; one summed wheel scrolls as far, sooner.
+func mergeWheel(queued, next browserOperation) (browserOperation, bool) {
+	if !queued.wheel() || !next.wheel() {
+		return next, false
+	}
+	a, b := queued.input, next.input
+	if a.Generation != b.Generation || a.TabId != b.TabId || a.Modifiers != b.Modifiers {
+		return next, false
+	}
+	merged := proto.Clone(b).(*pb.InputEvent)
+	merged.DeltaX += a.DeltaX
+	merged.DeltaY += a.DeltaY
+	return browserOperation{input: merged}, true
+}
 func (d *inputDispatcher) enqueue(o browserOperation) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -58,8 +79,11 @@ func (d *inputDispatcher) enqueue(o browserOperation) bool {
 	}
 	// Coalesce hover/drag positions only. Never reorder button transitions,
 	// keyboard input, paste, or navigation across a pointer movement.
-	if n := len(d.pending); n > 0 && o.motion() && d.pending[n-1].motion() && o.input.Buttons == d.pending[n-1].input.Buttons {
+	n := len(d.pending)
+	if n > 0 && o.motion() && d.pending[n-1].motion() && o.input.Buttons == d.pending[n-1].input.Buttons {
 		d.pending[n-1] = o
+	} else if merged, ok := mergeWheel(d.lastPending(), o); n > 0 && ok {
+		d.pending[n-1] = merged
 	} else {
 		if len(d.pending) >= 512 {
 			// A reset or release must still be admitted to prevent stuck drags.
@@ -81,6 +105,14 @@ func (d *inputDispatcher) enqueue(o browserOperation) bool {
 	default:
 	}
 	return true
+}
+
+// lastPending returns the newest queued operation, or a zero one. Caller holds mu.
+func (d *inputDispatcher) lastPending() browserOperation {
+	if len(d.pending) == 0 {
+		return browserOperation{}
+	}
+	return d.pending[len(d.pending)-1]
 }
 func (d *inputDispatcher) run() {
 	var known *pb.BrowserState
