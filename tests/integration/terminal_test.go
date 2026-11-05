@@ -133,6 +133,12 @@ func TestTerminalBrowser(t *testing.T) {
 	write("\x17") // Ctrl+W
 	waitState(t, c, func(s *pb.BrowserState) bool { return len(s.Tabs) == 1 && s.Url == url+"/" })
 	waitDisplay("Ready", url+"/")
+	// SGR wheel-right (button 67) must reach the page as a horizontal scroll.
+	write("\x0c" + url + "/wide\r")
+	waitState(t, c, func(s *pb.BrowserState) bool { return s.Url == url+"/wide" && !s.Loading })
+	waitDisplay("Ready", url+"/wide")
+	write("\x1b[<67;10;10M")
+	expectEvent(t, events, "scrolled-x")
 	// Ctrl+Q must remain a local command and restore the terminal on exit.
 	write("\x11\r")
 	select {

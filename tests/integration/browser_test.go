@@ -53,6 +53,12 @@ func fixture(t *testing.T) (string, <-chan string) {
         observer.observe(document.documentElement, {childList:true,subtree:true});
         </script>`))
 	})
+	mux.HandleFunc("/wide", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(`<title>Wide test</title><div style="width:5000px;height:100px">Wide</div><script>
+        addEventListener('scroll', () => { if (scrollX > 0) fetch('/event?value=scrolled-x'); }, {once:true});
+        </script>`))
+	})
 	mux.HandleFunc("/redirect", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/page?redirected=1", http.StatusFound)
 	})
