@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	"github.com/gdamore/tcell/v2"
+	"github.com/gdamore/tcell/v3"
 	"sync"
 	pb "termium/client/pb"
 )

@@ -17,7 +17,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/gdamore/tcell/v2"
+	"github.com/gdamore/tcell/v3"
 	"golang.org/x/image/draw"
 	"golang.org/x/sys/unix"
 	"golang.org/x/term"
@@ -360,7 +360,7 @@ func runInteractive() error {
 				return
 			}
 			if frames.Publish(f) {
-				_ = s.PostEvent(tcell.NewEventInterrupt(frameEvent{}))
+				_ = postEvent(s, tcell.NewEventInterrupt(frameEvent{}))
 			}
 		})
 	}()
@@ -412,6 +412,9 @@ func finalizeScreen(s tcell.Screen) {
 	if cfg.Renderer == "kitty" {
 		fmt.Fprint(graphicsOutput, kittyDeleteAll())
 	}
+	screenMu.Lock()
+	screenClosed = true
+	screenMu.Unlock()
 	s.Fini()
 	Debug("Screen finalized", DEBUG)
 }
@@ -444,10 +447,31 @@ func setupSignalHandling(s tcell.Screen) {
 	}()
 }
 
+// screenClosed guards EventQ: Fini closes the channel, so a late send would panic.
+var (
+	screenMu     sync.RWMutex
+	screenClosed bool
+)
+
+// postEvent queues ev without blocking; false means the queue is full or closed.
+func postEvent(s tcell.Screen, ev tcell.Event) bool {
+	screenMu.RLock()
+	defer screenMu.RUnlock()
+	if screenClosed {
+		return false
+	}
+	select {
+	case s.EventQ() <- ev:
+		return true
+	default:
+		return false
+	}
+}
+
 // Retry important events under backpressure without touching the screen buffer.
 func postUI(s tcell.Screen, value any) {
 	for appCtx.Err() == nil {
-		if s.PostEvent(tcell.NewEventInterrupt(value)) == nil {
+		if postEvent(s, tcell.NewEventInterrupt(value)) {
 			return
 		}
 		select {
@@ -715,13 +739,17 @@ func redraw(s tcell.Screen) {
 func runMainLoop(s tcell.Screen) error {
 	redraw(s)
 	for {
-		ev := s.PollEvent()
+		ev := <-s.EventQ()
 		ensureLayout(s)
 		if ev == nil {
 			return nil
 		}
 		switch ev := ev.(type) {
 		case *tcell.EventResize:
+			// With in-band resize reports tcell adopts the new size only on
+			// Show or Sync. Show avoids Sync's clear on resize events that do
+			// not change the size; a real change repaints in handleResize.
+			s.Show()
 			ensureLayout(s)
 		case *tcell.EventInterrupt:
 			switch value := ev.Data().(type) {
@@ -843,8 +871,8 @@ func handleLocalKeyEvent(ev *tcell.EventKey) MenuAction {
 	}
 
 	// Handle printable characters if needed
-	if ev.Rune() != 0 {
-		switch ev.Rune() {
+	if r := keyRune(ev); r != 0 {
+		switch r {
 		case 'q', 'Q':
 			return MenuExit
 		}
@@ -1163,7 +1191,7 @@ func showSplashScreen(s tcell.Screen, splashPath string) error {
 
 	// Event loop
 	for {
-		ev := s.PollEvent()
+		ev := <-s.EventQ()
 		switch ev := ev.(type) {
 		case *tcell.EventInterrupt:
 			if _, ok := ev.Data().(quitEvent); ok {
@@ -1181,6 +1209,7 @@ func showSplashScreen(s tcell.Screen, splashPath string) error {
 				return nil
 			}
 		case *tcell.EventResize:
+			s.Show()
 			updateScreenDimensions(s)
 			if err := displayImageBuffer(s); err != nil {
 				return fmt.Errorf("failed to redisplay splash image after resize: %v", err)

@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/gdamore/tcell/v2"
+	"github.com/gdamore/tcell/v3"
 	"golang.org/x/image/draw"
 	"image"
 )

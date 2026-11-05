@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/gdamore/tcell/v2"
+	"github.com/gdamore/tcell/v3"
 	"image"
 	pb "termium/client/pb"
 	"time"
@@ -174,7 +174,7 @@ func (kh *KeyboardHandler) pointerKey(ev *tcell.EventKey) {
 		kh.pointerWheel(rect.Dy() / 2)
 		return
 	case tcell.KeyRune:
-		switch ev.Rune() {
+		switch keyRune(ev) {
 		case 'h':
 			delta.X = -step
 		case 'l':
@@ -203,7 +203,7 @@ func (kh *KeyboardHandler) pointerKey(ev *tcell.EventKey) {
 	kh.pointer.Y = max(rect.Min.Y, min(rect.Max.Y-1, kh.pointer.Y+delta.Y))
 	point, _ := pagePoint(rect, kh.pointer, true)
 	count := uint32(0)
-	if ev.Rune() == ' ' {
+	if keyRune(ev) == ' ' {
 		count = 1
 	}
 	kh.input(&pb.InputEvent{Kind: pb.InputKind_POINTER_INPUT, X: int32(point.X), Y: int32(point.Y), Buttons: kh.pointerHeld, ClickCount: count})

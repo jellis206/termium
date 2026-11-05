@@ -8,17 +8,60 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gdamore/tcell/v2"
+	"github.com/gdamore/tcell/v3"
+	"github.com/gdamore/tcell/v3/vt"
 	"google.golang.org/grpc"
 	pb "termium/client/pb"
 )
 
-func uiScreen(t *testing.T, w, h int) tcell.SimulationScreen {
+// testScreen is a real tcell screen driven by tcell's terminal emulator.
+type testScreen struct {
+	tcell.Screen
+	t    *testing.T
+	term vt.MockTerm
+}
+
+// SetSize resizes the emulated terminal and waits for the screen to adopt it,
+// without consuming the resulting EventResize. With in-band resize reports,
+// tcell reads the new size on its next Show, as the main loop's redraw does.
+func (s testScreen) SetSize(w, h int) {
+	s.t.Helper()
+	s.term.SetSize(vt.Coord{X: vt.Col(w), Y: vt.Row(h)})
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		s.Show()
+		if gw, gh := s.Size(); gw == w && gh == h {
+			return
+		}
+		if time.Now().After(deadline) {
+			s.t.Fatalf("screen never resized to %dx%d", w, h)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+// GetCursor flushes the screen and reports the emulated terminal's cursor.
+func (s testScreen) GetCursor() (x, y int, visible bool) {
+	s.Show()
+	if err := s.term.Drain(); err != nil {
+		s.t.Fatal(err)
+	}
+	backend := s.term.Backend()
+	pos := backend.GetPosition()
+	return int(pos.X), int(pos.Y), backend.GetCursor().IsVisible()
+}
+
+func uiScreen(t *testing.T, w, h int) testScreen {
 	t.Helper()
-	s := tcell.NewSimulationScreen("UTF-8")
-	if err := s.Init(); err != nil {
+	term := vt.NewMockTerm(vt.MockOptSize{X: vt.Col(w), Y: vt.Row(h)})
+	screen, err := tcell.NewTerminfoScreenFromTty(term)
+	if err != nil {
 		t.Fatal(err)
 	}
+	if err := screen.Init(); err != nil {
+		t.Fatal(err)
+	}
+	s := testScreen{Screen: screen, t: t, term: term}
 	s.SetSize(w, h)
 	oldDims, oldChars := sDims, charSize
 	charSize = CharSize{8, 16}
@@ -32,7 +75,7 @@ func recorder() (*KeyboardHandler, *[]browserOperation) {
 	kh.submit = func(op browserOperation) bool { ops = append(ops, op); return true }
 	return kh, &ops
 }
-func key(k tcell.Key) *tcell.EventKey { return tcell.NewEventKey(k, 0, tcell.ModNone) }
+func key(k tcell.Key) *tcell.EventKey { return tcell.NewEventKey(k, "", tcell.ModNone) }
 
 func TestTcellViewportColorsAndClipping(t *testing.T) {
 	s := uiScreen(t, 12, 9)
@@ -54,16 +97,16 @@ func TestTcellViewportColorsAndClipping(t *testing.T) {
 	}
 	for y := 0; y < 9; y++ {
 		for x := 0; x < 12; x++ {
-			ch, _, style, _ := s.GetContent(x, y)
-			fg, bg, _ := style.Decompose()
+			ch, style, _ := s.Get(x, y)
+			fg, bg := style.GetForeground(), style.GetBackground()
 			if !image.Pt(x, y).In(r) {
 				if bg != tcell.ColorPurple {
 					t.Fatalf("renderer overwrote chrome at %d,%d", x, y)
 				}
 				continue
 			}
-			if ch != '▀' || fg != tcell.NewRGBColor(250, 240, 230) || bg != tcell.NewRGBColor(10, 20, 30) {
-				t.Fatalf("bad sample at %d,%d: %c %v %v", x, y, ch, fg, bg)
+			if ch != "▀" || fg != tcell.NewRGBColor(250, 240, 230) || bg != tcell.NewRGBColor(10, 20, 30) {
+				t.Fatalf("bad sample at %d,%d: %q %v %v", x, y, ch, fg, bg)
 			}
 		}
 	}
@@ -80,7 +123,7 @@ func TestTinyTerminalAndUnicodeEditor(t *testing.T) {
 		t.Fatalf("Unicode edit corrupted: %q", d.editor.value())
 	}
 	d.HandleKey(key(tcell.KeyCtrlA))
-	d.HandleKey(tcell.NewEventKey(tcell.KeyRune, '界', 0))
+	d.HandleKey(tcell.NewEventKey(tcell.KeyRune, "界", 0))
 	if d.editor.value() != "界" {
 		t.Fatal(d.editor.value())
 	}
@@ -112,7 +155,7 @@ func TestPageKeysAndPasteDoNotBecomeCommands(t *testing.T) {
 	}
 	kh.pasteEvent(true)
 	for _, r := range "__KEY__Enter 世界" {
-		ev := tcell.NewEventKey(tcell.KeyRune, r, 0)
+		ev := tcell.NewEventKey(tcell.KeyRune, string(r), 0)
 		if exit, handled := kh.globalKey(ev, false); exit || handled {
 			t.Fatal("paste executed a shortcut")
 		}
@@ -164,7 +207,7 @@ func TestMouseCaptureWheelAndKeyboardPointer(t *testing.T) {
 		t.Fatal("right click lost")
 	}
 	kh.action("pointer")
-	kh.HandleKeyEvent(s, tcell.NewEventKey(tcell.KeyRune, ' ', 0))
+	kh.HandleKeyEvent(s, tcell.NewEventKey(tcell.KeyRune, " ", 0))
 	kh.HandleKeyEvent(s, key(tcell.KeyRight))
 	kh.HandleKeyEvent(s, key(tcell.KeyEscape))
 	last := (*ops)[len(*ops)-1].input
@@ -316,9 +359,8 @@ func TestMenuMouseCaptureDoesNotEatNextPageClick(t *testing.T) {
 func TestCombiningTextAndOversizedReplacement(t *testing.T) {
 	s := uiScreen(t, 20, 8)
 	drawText(s, 1, 0, 18, "e\u0301界", tcell.StyleDefault)
-	r, combining, _, _ := s.GetContent(1, 0)
-	if r != 'e' || len(combining) != 1 || combining[0] != '\u0301' {
-		t.Fatal("combining accent lost", r, combining)
+	if cell, _, _ := s.Get(1, 0); cell != "e\u0301" {
+		t.Fatalf("combining accent lost: %q", cell)
 	}
 	var e textEditor
 	e.set("keep this address", true)

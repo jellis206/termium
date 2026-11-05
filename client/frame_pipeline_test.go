@@ -18,7 +18,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gdamore/tcell/v2"
+	"github.com/gdamore/tcell/v3"
 	"github.com/mattn/go-sixel"
 )
 
@@ -85,7 +85,7 @@ func TestPreparationKeepsOnlyNewestPendingFrame(t *testing.T) {
 	s := uiScreen(t, 80, 24)
 	kh, _ := recorder()
 	kh.globalKey(key(tcell.KeyCtrlL), false)
-	kh.HandleKeyEvent(s, tcell.NewEventKey(tcell.KeyRune, 'x', 0))
+	kh.HandleKeyEvent(s, tcell.NewEventKey(tcell.KeyRune, "x", 0))
 	if kh.editor.value() != "x" {
 		t.Fatal("local editor did not progress during preparation")
 	}

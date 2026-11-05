@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gdamore/tcell/v2"
+	"github.com/gdamore/tcell/v3"
 	pb "termium/client/pb"
 )
 
@@ -342,8 +342,15 @@ func (kh *KeyboardHandler) action(id string) {
 		kh.menu = false
 	}
 }
+// keyRune returns the key's text when it is exactly one rune, else 0.
+func keyRune(ev *tcell.EventKey) rune {
+	if r := []rune(ev.Str()); len(r) == 1 {
+		return r[0]
+	}
+	return 0
+}
 func ctrl(ev *tcell.EventKey, key tcell.Key, r rune) bool {
-	return ev.Key() == key || ev.Modifiers()&tcell.ModCtrl != 0 && (ev.Rune() == r || ev.Rune() == r-32)
+	return ev.Key() == key || ev.Modifiers()&tcell.ModCtrl != 0 && (keyRune(ev) == r || keyRune(ev) == r-32)
 }
 
 // Global shortcuts are checked before modal input. Paste content never executes them.
@@ -404,7 +411,7 @@ func (kh *KeyboardHandler) globalKey(ev *tcell.EventKey, modal bool) (bool, bool
 func (kh *KeyboardHandler) HandleKeyEvent(s tcell.Screen, ev *tcell.EventKey) bool {
 	if kh.pasting {
 		if ev.Key() == tcell.KeyRune && kh.paste.Len() < 1024*1024 {
-			kh.paste.WriteRune(ev.Rune())
+			kh.paste.WriteString(ev.Str())
 		} else if ev.Key() == tcell.KeyEnter {
 			kh.paste.WriteByte('\n')
 		} else if ev.Key() == tcell.KeyTab {
@@ -419,10 +426,10 @@ func (kh *KeyboardHandler) HandleKeyEvent(s tcell.Screen, ev *tcell.EventKey) bo
 		case tcell.KeyEscape:
 			kh.quitConfirm = false
 		}
-		if ev.Rune() == 'n' || ev.Rune() == 'N' {
+		if r := keyRune(ev); r == 'n' || r == 'N' {
 			kh.quitConfirm = false
 		}
-		if ev.Rune() == 'y' || ev.Rune() == 'Y' {
+		if r := keyRune(ev); r == 'y' || r == 'Y' {
 			return true
 		}
 		return false
@@ -555,10 +562,10 @@ func (kh *KeyboardHandler) pageKey(ev *tcell.EventKey) {
 	}
 	if ev.Key() == tcell.KeyRune {
 		if mod&7 == 0 {
-			kh.input(&pb.InputEvent{Kind: pb.InputKind_TEXT_INPUT, Text: string(ev.Rune()), Modifiers: mod})
+			kh.input(&pb.InputEvent{Kind: pb.InputKind_TEXT_INPUT, Text: ev.Str(), Modifiers: mod})
 			return
 		}
-		key = string(ev.Rune())
+		key = ev.Str()
 	}
 	if key != "" {
 		kh.input(&pb.InputEvent{Kind: pb.InputKind_KEY_INPUT, Key: key, Modifiers: mod})

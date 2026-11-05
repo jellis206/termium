@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/gdamore/tcell/v2"
+	"github.com/gdamore/tcell/v3"
 	"github.com/mattn/go-runewidth"
 	"strings"
 	"unicode"
@@ -92,7 +92,7 @@ func (e *textEditor) key(ev *tcell.EventKey) bool {
 		if ev.Key() != tcell.KeyRune || ev.Modifiers()&(tcell.ModCtrl|tcell.ModAlt|tcell.ModMeta) != 0 {
 			return false
 		}
-		e.insert(string(ev.Rune()))
+		e.insert(ev.Str())
 	}
 	return true
 }
